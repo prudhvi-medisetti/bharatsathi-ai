@@ -1,0 +1,56 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /users/{userId}/applications/{applicationId}/documents/{documentId}/{fileName} {
+      function isOwner() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+
+      allow read, delete: if isOwner();
+      allow create: if isOwner()
+        && request.resource.metadata.ownerUid == request.auth.uid
+        && request.resource.metadata.applicationId == applicationId
+        && request.resource.metadata.documentId == documentId
+        && request.resource.metadata.schemeId is string
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType.matches('^(application/pdf|image/jpeg|image/png)$');
+      allow update: if false;
+    }
+
+    match /users/{userId}/documents/{documentId}/{fileName} {
+      function isOwner() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+
+      function validApplicationMetadata() {
+        return !request.resource.metadata.keys().hasAny(['applicationId', 'schemeId'])
+          || (request.resource.metadata.keys().hasAll(['applicationId', 'schemeId'])
+            && request.resource.metadata.applicationId is string
+            && request.resource.metadata.schemeId is string);
+      }
+
+      allow read, delete: if isOwner();
+      allow create: if isOwner()
+        && request.resource.metadata.ownerUid == request.auth.uid
+        && request.resource.metadata.documentId == documentId
+        && validApplicationMetadata()
+        && request.resource.size <= 10 * 1024 * 1024
+        && request.resource.contentType.matches('^(application/pdf|image/jpeg|image/png)$');
+      allow update: if false;
+    }
+
+    match /users/{userId}/documents/{documentId} {
+      allow read, delete: if request.auth != null && request.auth.uid == userId;
+      allow create, update: if false;
+    }
+
+    match /users/{userId}/profile/{imageName} {
+      allow read, delete: if request.auth != null
+        && request.auth.uid == userId;
+      allow create, update: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.metadata.ownerUid == request.auth.uid
+        && request.resource.contentType.matches('image/.*');
+    }
+  }
+}

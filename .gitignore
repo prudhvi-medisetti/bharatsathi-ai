@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+!.env.example
+backend/.env
+.env.local
+.env.*.local
+.vite/

@@ -1,0 +1,116 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /schemes/{schemeId} { allow read: if true; allow write: if false; }
+
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function ownsApplication(applicationId, schemeId) {
+      return exists(/databases/$(database)/documents/applications/$(applicationId))
+        && get(/databases/$(database)/documents/applications/$(applicationId)).data.userId == request.auth.uid
+        && get(/databases/$(database)/documents/applications/$(applicationId)).data.schemeId == schemeId;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.email == request.auth.token.email;
+      allow update: if isOwner(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.email == resource.data.email;
+      allow delete: if isOwner(userId);
+      match /savedSchemes/{schemeId} { allow read, write: if isOwner(userId); }
+      match /applications/{applicationId} { allow read, write: if isOwner(userId); }
+      match /conversations/{conversationId} {
+        allow read, write: if isOwner(userId);
+        match /messages/{messageId} {
+          allow read, write: if isOwner(userId);
+        }
+      }
+    }
+
+    match /savedSchemes/{schemeId} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+
+    match /applications/{applicationId} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+
+    match /documents/{documentId} {
+      function isOwner() {
+        return request.auth != null && resource.data.userId == request.auth.uid;
+      }
+
+      function validClientDocument() {
+        return request.resource.data.keys().hasOnly([
+            'userId', 'documentId', 'documentType', 'customDocumentName', 'fileName', 'contentType', 'mimeType', 'size', 'fileSize',
+            'contentHash', 'storagePath', 'applicationId', 'schemeId', 'schemeName',
+            'documentTypeCheck', 'ocrConfidence', 'structureSignals', 'documentRisk',
+            'riskSignals', 'officialVerificationStatus', 'uploadedAt', 'updatedAt',
+            'status', 'verificationStatus', 'verificationMessage', 'storageConsent'
+          ])
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.documentId == documentId
+          && request.resource.data.documentType is string
+          && (request.resource.data.documentType != 'Other'
+            || (request.resource.data.customDocumentName is string
+              && request.resource.data.customDocumentName.size() > 0
+              && request.resource.data.customDocumentName.size() <= 120))
+          && request.resource.data.fileName is string
+          && request.resource.data.fileName.size() > 0
+          && !request.resource.data.fileName.matches('.*[/\\\\].*')
+          && request.resource.data.storagePath == 'users/' + request.auth.uid + '/documents/' + documentId + '/' + request.resource.data.fileName
+          && (!request.resource.data.keys().hasAny(['applicationId', 'schemeId', 'schemeName'])
+            || (request.resource.data.keys().hasAll(['applicationId', 'schemeId', 'schemeName'])
+              && request.resource.data.applicationId is string
+              && request.resource.data.schemeId is string
+              && request.resource.data.schemeName is string
+              && ownsApplication(request.resource.data.applicationId, request.resource.data.schemeId)))
+          && request.resource.data.contentType in ['application/pdf', 'image/jpeg', 'image/png']
+          && request.resource.data.mimeType == request.resource.data.contentType
+          && request.resource.data.size is int
+          && request.resource.data.fileSize == request.resource.data.size
+          && request.resource.data.size > 0
+          && request.resource.data.size <= 10 * 1024 * 1024
+          && request.resource.data.status in ['UPLOADED', 'NEEDS_REUPLOAD', 'NEEDS_REVIEW']
+          && request.resource.data.verificationStatus == 'PENDING'
+          && request.resource.data.officialVerificationStatus == 'UNAVAILABLE'
+          && request.resource.data.storageConsent == true;
+      }
+
+      allow read: if isOwner();
+      allow create: if request.auth != null && validClientDocument();
+      allow update: if false;
+      allow delete: if isOwner();
+    }
+
+    match /activities/{activityId} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+
+    match /_private_account_recovery_codes/{recoveryCodeId} {
+      allow read, write: if false;
+    }
+  }
+}
